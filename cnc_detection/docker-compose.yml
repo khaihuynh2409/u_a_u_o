@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  cnc-processor:
+    build: .
+    container_name: zeek_cnc_botnet
+    volumes:
+      # Ánh xạ thư mục output từ Windows vào Docker để lấy dữ liệu CSV
+      - ./output:/app/output
+    # Không tự động restart sau khi đã xử lý xong dữ liệu
+    restart: "no"
