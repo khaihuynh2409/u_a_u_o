@@ -31,8 +31,9 @@ def load_trained_model():
     model.eval()
     return model
 
-st.title("🖥️ He thong Giam sat & Phat hien May chu C&C")
-st.write("Cong cu nghien cuu khoa hoc dua tren Deep Learning (LSTM)")
+st.title("🖥️ Hệ thống Giám sát & Phát hiện Máy chủ C&C")
+st.write("Công cụ nghiên cứu khoa học: " + "Nghiên cứu xây dựng công cụ phát hiện máy chủ C&C trên mạng Internet")
+st.write("**Nhóm thực hiện:** Huỳnh Quốc Khải, Nguyễn Hữu Hoàng, Vũ Thị Thu Trang | **GVHD:** Đại úy TS. Tống Anh Tuấn")
 
 # Layout chia lam 2 cot
 col_sidebar, col_main = st.columns([1, 3])

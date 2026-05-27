@@ -1,0 +1,23 @@
+# Môi trường ảo Python
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# File dữ liệu mạng nặng và file cấu hình cache local
+*.pcap
+*threat_intel_cache.json
+
+# Các file lưu mô hình ML (nếu dung lượng lớn)
+*.joblib
+*.npy
+*.pkl
+
+train_data/
+*.csv
+*.pcap

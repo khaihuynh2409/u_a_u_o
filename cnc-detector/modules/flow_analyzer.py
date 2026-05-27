@@ -110,9 +110,9 @@ class FlowAnalyzer:
                 max_depth=6,
                 learning_rate=0.1,
                 scale_pos_weight=n_benign / n_malicious,
-                use_label_encoder=False,
                 eval_metric='logloss',
-                random_state=42
+                random_state=42,
+                verbosity=0
             )
             self.model.fit(X_scaled, y)
 

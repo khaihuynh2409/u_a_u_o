@@ -42,6 +42,63 @@ class DGADetector:
         self.char_to_idx = {}
         self._loaded = False
 
+    def _check_system_support(self):
+        import sys
+        import os
+        import subprocess
+
+        # Trên Linux/Mac, TensorFlow luôn hỗ trợ (không cần kiểm tra AVX qua WinAPI)
+        if sys.platform != 'win32':
+            try:
+                check_script = (
+                    "import os; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'; "
+                    "import tensorflow"
+                )
+                result = subprocess.run(
+                    [sys.executable, "-c", check_script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=15
+                )
+                return result.returncode == 0
+            except Exception:
+                return False
+
+        import ctypes
+        try:
+            # 1. Kiểm tra AVX (TensorFlow 2.x yêu cầu tối thiểu AVX)
+            # PF_AVX_INSTRUCTIONS_AVAILABLE = 17
+            if ctypes.windll.kernel32.IsProcessorFeaturePresent(17) == 0:
+                return False
+                
+            # 2. Kiểm tra import an toàn
+            python_exe = sys.executable
+            pythonw_exe = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+            if os.path.exists(pythonw_exe):
+                python_exe = pythonw_exe
+            
+            check_script = (
+                "import sys, ctypes; "
+                "ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000); "
+                "import os; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'; "
+                "import tensorflow"
+            )
+            
+            # Use DETACHED_PROCESS (0x00000008) and CREATE_NO_WINDOW (0x08000000)
+            flags = 0x08000000 | 0x00000008
+
+            result = subprocess.run(
+                [python_exe, "-c", check_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=flags,
+                timeout=15
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def load(self):
         """Tải mô hình Bi-LSTM từ file."""
         if self._loaded:
@@ -52,14 +109,18 @@ class DGADetector:
             self.char_to_idx['<UNK>'] = len(self.char_to_idx) + 1
 
             if MODEL_PATH.exists():
+                tf_supported = self._check_system_support()
+                
+                if not tf_supported:
+                    raise ImportError("TensorFlow not supported on this CPU")
+                    
                 import tensorflow as tf
                 self.model = tf.keras.models.load_model(str(MODEL_PATH))
                 self._loaded = True
             else:
                 self._create_demo_model()
             return True
-        except Exception as e:
-            print(f"[DGADetector] Lỗi tải mô hình: {e}")
+        except Exception:
             self._use_heuristic_only()
             return True
 
@@ -69,6 +130,11 @@ class DGADetector:
         Kiến trúc: Embedding -> Bi-LSTM -> Dropout -> Dense
         """
         try:
+            tf_supported = self._check_system_support()
+                
+            if not tf_supported:
+                raise ImportError("TensorFlow not supported on this CPU")
+
             import tensorflow as tf
             from tensorflow.keras.models import Sequential
             from tensorflow.keras.layers import (
@@ -131,17 +197,15 @@ class DGADetector:
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             self.model.save(str(MODEL_PATH))
             self._loaded = True
-            print("[DGADetector] Đã tạo và lưu mô hình Bi-LSTM demo.")
+            # print("[DGADetector] Đã tạo và lưu mô hình Bi-LSTM demo.")
 
-        except Exception as e:
-            print(f"[DGADetector] Lỗi tạo mô hình: {e}")
+        except Exception:
             self._use_heuristic_only()
 
     def _use_heuristic_only(self):
         """Fallback: chỉ dùng heuristic nếu không có TensorFlow."""
         self.model = None
         self._loaded = True
-        print("[DGADetector] Chạy ở chế độ heuristic (không có Deep Learning).")
 
     def _tokenize(self, domain: str) -> np.ndarray:
         """Chuyển đổi chuỗi tên miền thành chuỗi số (tokenization)."""

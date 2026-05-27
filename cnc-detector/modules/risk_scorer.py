@@ -73,6 +73,7 @@ class RiskScorer:
             "low_count": 0,
             "safe_count": 0,
         }
+        self._score_history = []  # Lưu lịch sử điểm để adaptive threshold
 
     def calculate(self,
                   flow_result: dict = None,
@@ -171,7 +172,12 @@ class RiskScorer:
 
         # Cập nhật thống kê
         self._stats["total_analyzed"] += 1
-        self._stats[f"{alert_level.lower()}_count"] = self._stats.get(f"{alert_level.lower()}_count", 0) + 1
+        stat_key = f"{alert_level.lower()}_count"
+        self._stats[stat_key] = self._stats.get(stat_key, 0) + 1
+        self._score_history.append(raw_score)
+        # Giữ tối đa 1000 điểm trong lịch sử
+        if len(self._score_history) > 1000:
+            self._score_history = self._score_history[-1000:]
 
         # Tạo AlertRecord
         record = AlertRecord(

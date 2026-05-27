@@ -1,16 +1,23 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # Suppress TensorFlow logging
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+import warnings
+warnings.filterwarnings('ignore') # Suppress all Python warnings
+
 import customtkinter as ctk
 import threading
 import time
 from datetime import datetime
 from PIL import Image, ImageTk
 import sys
-import os
 from tkinter import ttk
 import tkinter as tk
 import csv
 from tkinter import filedialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import os
 
 from modules.flow_analyzer import FlowAnalyzer
 from modules.dga_detector import DGADetector
@@ -35,7 +42,7 @@ class CNCDetectorApp(ctk.CTk):
         self.risk_scorer = RiskScorer()
         self.sniffer = PacketSniffer(callback=self.on_packet_captured)
         
-        self.title("C&C Server Detection System - Advanced AI Edition")
+        self.title("Công Cụ Phát Hiện Máy Chủ C&C Trên Mạng Internet")
         self.geometry("1280x720")
         
         # Giao diện chính siêu tối
@@ -47,6 +54,9 @@ class CNCDetectorApp(ctk.CTk):
         self.stats = {"flows": 0, "malicious": 0, "dga": 0}
         self.packet_features_map = {}
         self.all_alerts = []
+        
+        # Danh sách file PCAP đã import
+        self.pcap_files = {}  # {display_name: filepath}
         
         # Cấu trúc UI
         self.grid_columnconfigure(1, weight=1)
@@ -64,27 +74,41 @@ class CNCDetectorApp(ctk.CTk):
         self.log_message("System", "Đang tải mô hình Bi-LSTM...")
         self.dga_detector.load()
         self.log_message("System", "Khởi tạo hệ thống hoàn tất. Sẵn sàng hoạt động.")
-        self.btn_start.configure(state="normal")
+        self.after(0, lambda: self.btn_start.configure(state="normal"))
 
     def create_sidebar(self):
         self.sidebar_frame = ctk.CTkScrollableFrame(self, width=300, corner_radius=0, fg_color="#0f172a", border_width=0, scrollbar_button_color="#1e293b", scrollbar_button_hover_color="#334155")
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(8, weight=1)
+        self.sidebar_frame.grid_rowconfigure(10, weight=1)
 
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="🛡️ C&C DETECTOR", font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"), text_color="#38bdf8")
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 15))
 
         # Mode Selection
-        self.mode_var = ctk.StringVar(value="demo_mixed")
-        self.lbl_mode = ctk.CTkLabel(self.sidebar_frame, text="Chế độ hoạt động:")
+        self.mode_var = ctk.StringVar(value="live_capture")
+        self.lbl_mode = ctk.CTkLabel(self.sidebar_frame, text="Chế độ hoạt động:", font=ctk.CTkFont(size=13))
         self.lbl_mode.grid(row=1, column=0, padx=20, pady=(5, 0), sticky="w")
         
         self.opt_mode = ctk.CTkOptionMenu(
             self.sidebar_frame, 
             variable=self.mode_var,
-            values=["demo_mixed", "demo_clean", "demo_malicious", "live_capture"]
+            values=["live_capture"],
+            command=self.on_mode_changed,
+            fg_color="#1e293b",
+            button_color="#334155",
+            button_hover_color="#475569",
+            dropdown_fg_color="#1e293b",
+            dropdown_hover_color="#334155",
         )
         self.opt_mode.grid(row=2, column=0, padx=20, pady=(5, 5), sticky="ew")
+
+        # Import PCAP Button
+        self.btn_import = ctk.CTkButton(
+            self.sidebar_frame, text="📂 IMPORT PCAP", font=ctk.CTkFont(weight="bold"),
+            command=self.import_pcap,
+            fg_color="transparent", border_width=2, border_color="#f59e0b", text_color="#f59e0b", hover_color="#451a03"
+        )
+        self.btn_import.grid(row=3, column=0, padx=20, pady=(5, 5), sticky="ew")
 
         # Controls
         self.btn_start = ctk.CTkButton(
@@ -92,25 +116,25 @@ class CNCDetectorApp(ctk.CTk):
             command=self.toggle_sniffing, state="disabled", 
             fg_color="transparent", border_width=2, border_color="#10b981", text_color="#10b981", hover_color="#064e3b"
         )
-        self.btn_start.grid(row=3, column=0, padx=20, pady=(15, 5), sticky="ew")
+        self.btn_start.grid(row=4, column=0, padx=20, pady=(10, 5), sticky="ew")
 
         self.btn_chart = ctk.CTkButton(
             self.sidebar_frame, text="📊 XEM BIỂU ĐỒ", font=ctk.CTkFont(weight="bold"),
             command=self.show_chart, 
             fg_color="transparent", border_width=2, border_color="#38bdf8", text_color="#38bdf8", hover_color="#0c4a6e"
         )
-        self.btn_chart.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        self.btn_chart.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
 
         self.btn_export = ctk.CTkButton(
             self.sidebar_frame, text="💾 XUẤT CSV", font=ctk.CTkFont(weight="bold"),
             command=self.export_csv, 
             fg_color="transparent", border_width=2, border_color="#c084fc", text_color="#c084fc", hover_color="#4c1d95"
         )
-        self.btn_export.grid(row=5, column=0, padx=20, pady=(5, 10), sticky="ew")
+        self.btn_export.grid(row=6, column=0, padx=20, pady=(5, 10), sticky="ew")
 
         # Stats
         self.stats_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="#1e293b", corner_radius=8, border_width=1, border_color="#334155")
-        self.stats_frame.grid(row=6, column=0, padx=15, pady=5, sticky="nsew")
+        self.stats_frame.grid(row=7, column=0, padx=15, pady=5, sticky="nsew")
         
         ctk.CTkLabel(self.stats_frame, text="THỐNG KÊ HỆ THỐNG", font=ctk.CTkFont(size=13, weight="bold"), text_color="#94a3b8").pack(pady=(5, 2))
         self.lbl_flows = ctk.CTkLabel(self.stats_frame, text="Luồng mạng: 0", font=ctk.CTkFont(size=13))
@@ -124,7 +148,7 @@ class CNCDetectorApp(ctk.CTk):
 
         # Packet Params Stats
         self.packet_stats_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="#1e293b", corner_radius=8, border_width=1, border_color="#334155")
-        self.packet_stats_frame.grid(row=7, column=0, padx=15, pady=(5, 10), sticky="nsew")
+        self.packet_stats_frame.grid(row=8, column=0, padx=15, pady=(5, 10), sticky="nsew")
         
         ctk.CTkLabel(self.packet_stats_frame, text="THÔNG SỐ GÓI TIN", font=ctk.CTkFont(size=14, weight="bold"), text_color="#94a3b8").pack(pady=(10, 5))
         
@@ -137,6 +161,82 @@ class CNCDetectorApp(ctk.CTk):
             lbl = ctk.CTkLabel(self.packet_stats_frame, text=f"{p}: N/A", font=ctk.CTkFont(size=14))
             lbl.pack(anchor="w", padx=15, pady=3)
             self.param_labels[p] = lbl
+
+        self.author_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.author_frame.grid(row=11, column=0, padx=15, pady=(10, 10), sticky="sw")
+        
+        authors_text = "Nhóm thực hiện:\n1. Huỳnh Quốc Khải - B5D13\n2. Nguyễn Hữu Hoàng - B5D13\n3. Vũ Thị Thu Trang - B6D13\n\nGVHD: Đại úy TS. Tống Anh Tuấn"
+        self.lbl_authors = ctk.CTkLabel(self.author_frame, text=authors_text, justify="left", font=ctk.CTkFont(size=12), text_color="#94a3b8")
+        self.lbl_authors.pack(anchor="w")
+
+    def import_pcap(self):
+        """Mở hộp thoại Browse để chọn file PCAP và thêm vào dropdown."""
+        filepaths = filedialog.askopenfilenames(
+            title="Chọn file PCAP để phân tích",
+            filetypes=[
+                ("PCAP files", "*.pcap *.pcapng *.cap"),
+                ("Tất cả file", "*.*")
+            ]
+        )
+        if not filepaths:
+            return
+
+        added_count = 0
+        for filepath in filepaths:
+            filename = os.path.basename(filepath)
+            display_name = f"pcap: {filename}"
+            
+            # Tránh thêm trùng lặp
+            if display_name in self.pcap_files:
+                self.log_message("Import", f"File đã tồn tại trong danh sách: {filename}")
+                continue
+            
+            self.pcap_files[display_name] = filepath
+            added_count += 1
+
+        if added_count > 0:
+            # Cập nhật dropdown với danh sách mới
+            new_values = ["live_capture"] + list(self.pcap_files.keys())
+            self.opt_mode.configure(values=new_values)
+            
+            # Tự động chọn file vừa thêm (file cuối cùng nếu nhiều)
+            last_display = f"pcap: {os.path.basename(filepaths[-1])}"
+            if last_display in self.pcap_files:
+                self.mode_var.set(last_display)
+                self.opt_mode.set(last_display)
+            
+            self.log_message("Import", f"Đã thêm {added_count} file PCAP vào danh sách phân tích.")
+        
+    def on_mode_changed(self, new_mode: str):
+        """
+        Xử lý khi người dùng đổi chế độ hoạt động.
+        Nếu đang chạy: tự động dừng chế độ cũ và khởi động chế độ mới ngầm.
+        """
+        if not self.is_running:
+            return  # Chưa chạy thì không cần làm gì
+        
+        # Dừng sniffer cũ ngầm (không đổi UI button)
+        self.log_message("System", f"Chuyển sang chế độ: {new_mode} — đang khởi động lại...")
+        self.sniffer.stop()
+        
+        # Khởi động sniffer mới theo mode
+        def _restart():
+            time.sleep(0.5)  # Chờ thread cũ dừng hẳn
+            if not self.is_running:
+                return
+            if new_mode == "live_capture":
+                self.sniffer.start_live()
+                self.after(0, lambda: self.log_message("System", "Đã chuyển sang Live Capture."))
+            elif new_mode.startswith("pcap:"):
+                filepath = self.pcap_files.get(new_mode, "")
+                if filepath and os.path.exists(filepath):
+                    self.sniffer.start_pcap(filepath)
+                    fname = os.path.basename(filepath)
+                    self.after(0, lambda: self.log_message("System", f"Đang phân tích PCAP: {fname}"))
+                else:
+                    self.after(0, lambda: self.log_message("System", f"File PCAP không tìm thấy: {new_mode}"))
+        
+        threading.Thread(target=_restart, daemon=True).start()
 
     def update_packet_stats(self, flow_features):
         if not flow_features:
@@ -184,7 +284,7 @@ class CNCDetectorApp(ctk.CTk):
         self.main_frame.grid_columnconfigure(0, weight=1)
 
         # Header
-        self.header_label = ctk.CTkLabel(self.main_frame, text="LIVE NETWORK MONITOR", font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"), text_color="#f8fafc")
+        self.header_label = ctk.CTkLabel(self.main_frame, text="HỆ THỐNG GIÁM SÁT MẠNG THEO THỜI GIAN THỰC", font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"), text_color="#f8fafc")
         self.header_label.grid(row=0, column=0, padx=10, pady=(0, 20), sticky="w")
 
         # Packet Table Area (Treeview)
@@ -229,12 +329,12 @@ class CNCDetectorApp(ctk.CTk):
         # Bắt sự kiện click vào Treeview
         self.packet_table.bind("<<TreeviewSelect>>", self.on_packet_select)
         
-        self.packet_table.tag_configure('CRITICAL', background='#7f1d1d', foreground='#fca5a5') # Dark red / Light red
-        self.packet_table.tag_configure('HIGH', background='#7c2d12', foreground='#fdba74') # Dark orange
-        self.packet_table.tag_configure('MEDIUM', background='#713f12', foreground='#fde047') # Dark yellow
-        self.packet_table.tag_configure('LOW', background='#1e3a8a', foreground='#93c5fd') # Dark blue
-        self.packet_table.tag_configure('SAFE', background='#0f172a', foreground='#86efac') # Default / Light green
-        self.packet_table.tag_configure('SYSTEM', background='#1e293b', foreground='#94a3b8') # Grayish
+        self.packet_table.tag_configure('CRITICAL', background='#7f1d1d', foreground='#fca5a5')
+        self.packet_table.tag_configure('HIGH', background='#7c2d12', foreground='#fdba74')
+        self.packet_table.tag_configure('MEDIUM', background='#713f12', foreground='#fde047')
+        self.packet_table.tag_configure('LOW', background='#1e3a8a', foreground='#93c5fd')
+        self.packet_table.tag_configure('SAFE', background='#0f172a', foreground='#86efac')
+        self.packet_table.tag_configure('SYSTEM', background='#1e293b', foreground='#94a3b8')
 
         # Alerts Panel (Bottom)
         self.alert_frame = ctk.CTkFrame(self.main_frame, height=220, fg_color="#1e293b", corner_radius=10, border_width=1, border_color="#ef4444")
@@ -254,11 +354,17 @@ class CNCDetectorApp(ctk.CTk):
             self.btn_start.configure(text="⏹ DỪNG GIÁM SÁT", fg_color="transparent", border_color="#ef4444", text_color="#ef4444", hover_color="#7f1d1d")
             self.is_running = True
             
-            if mode.startswith("demo"):
-                scenario = mode.split("_")[1]
-                self.sniffer.start_demo(scenario=scenario, interval=1.5)
-            else:
+            if mode == "live_capture":
                 self.sniffer.start_live()
+            elif mode.startswith("pcap:"):
+                filepath = self.pcap_files.get(mode, "")
+                if filepath and os.path.exists(filepath):
+                    self.sniffer.start_pcap(filepath)
+                    self.log_message("System", f"Phân tích PCAP: {os.path.basename(filepath)}")
+                else:
+                    self.log_message("System", f"⚠️ Không tìm thấy file: {mode}")
+                    self.is_running = False
+                    self.btn_start.configure(text="▶ BẮT ĐẦU GIÁM SÁT", fg_color="transparent", border_color="#10b981", text_color="#10b981", hover_color="#064e3b")
         else:
             self.log_message("System", "Dừng giám sát.")
             self.btn_start.configure(text="▶ BẮT ĐẦU GIÁM SÁT", fg_color="transparent", border_color="#10b981", text_color="#10b981", hover_color="#064e3b")
@@ -280,7 +386,7 @@ class CNCDetectorApp(ctk.CTk):
         # 2. Phân tích DGA Domain
         domain = flow_data.get("domain", "")
         dga_res = None
-        if domain:
+        if domain and domain != flow_data.get("remote_ip", ""):
             dga_res = self.dga_detector.predict(domain)
             if dga_res["is_dga"]:
                 self.stats["dga"] += 1
@@ -295,9 +401,8 @@ class CNCDetectorApp(ctk.CTk):
         # 4. Phân tích Process (Masquerading)
         process_name = flow_data.get("process", "UNKNOWN")
         pid = flow_data.get("pid", -1)
-        # Giả lập cờ process cho demo
         proc_flags = []
-        if process_name in ["svchost32.exe", "explorer32.exe", "powershell.exe"]:
+        if process_name in ["svchost32.exe", "explorer32.exe", "powershell.exe", "cmd.exe"]:
              proc_flags.append(f"⚠️ Process bất thường: {process_name}")
 
         # 5. Tổng hợp điểm rủi ro
@@ -309,7 +414,6 @@ class CNCDetectorApp(ctk.CTk):
             "process_pid": pid
         }
         
-        # Tính toán Ensemble Score
         alert_record = self.risk_scorer.calculate(
             flow_result=flow_res,
             dga_result=dga_res,
@@ -328,8 +432,11 @@ class CNCDetectorApp(ctk.CTk):
         proc = alert.process_name
         score = alert.risk_score
         
-        # Thêm row vào Table thay vì in ra Textbox
-        row_values = (ts, proc, ip, port, domain, f"{score:.1f}", alert.alert_level)
+        # Lấy tên hiển thị ngắn cho process
+        proc_display = proc if len(proc) <= 20 else proc[:18] + ".."
+        
+        # Thêm row vào Table
+        row_values = (ts, proc_display, ip, port, domain, f"{score:.1f}", alert.alert_level)
         item_id = self.packet_table.insert("", "end", values=row_values, tags=(alert.alert_level,))
         
         self.all_alerts.append({
@@ -342,10 +449,14 @@ class CNCDetectorApp(ctk.CTk):
         self.packet_features_map[item_id] = flow_features
         
         # Xóa dòng cũ nếu bảng quá dài (chống giật)
-        if len(self.packet_table.get_children()) > 1000:
-            old_item_id = self.packet_table.get_children()[0]
-            self.packet_table.delete(old_item_id)
-            self.packet_features_map.pop(old_item_id, None)
+        children = self.packet_table.get_children()
+        if len(children) > 1000:
+            try:
+                old_item_id = children[0]
+                self.packet_table.delete(old_item_id)
+                self.packet_features_map.pop(old_item_id, None)
+            except Exception:
+                pass
             
         # Cuộn bảng xuống cuối
         self.packet_table.yview_moveto(1)
@@ -370,14 +481,12 @@ class CNCDetectorApp(ctk.CTk):
             self.alert_textbox.configure(state="disabled")
 
     def log_message(self, source, message):
-        ts = datetime.now().strftime("%H:%M:%S")
-        # Thêm system log vào bảng
-        row_values = (ts, f"[{source}]", "N/A", "-", message, "0.0", "SYSTEM")
-        self.packet_table.insert("", "end", values=row_values, tags=('SYSTEM',))
-        self.packet_table.yview_moveto(1)
-
-    def log_message_raw(self, msg):
-        pass
+        def _update():
+            ts = datetime.now().strftime("%H:%M:%S")
+            row_values = (ts, f"[{source}]", "N/A", "-", message, "0.0", "SYSTEM")
+            self.packet_table.insert("", "end", values=row_values, tags=('SYSTEM',))
+            self.packet_table.yview_moveto(1)
+        self.after(0, _update)
 
     def export_csv(self):
         if not self.all_alerts:
@@ -414,7 +523,6 @@ class CNCDetectorApp(ctk.CTk):
         scores = [item["Risk"] for item in self.all_alerts]
         
         fig, ax = plt.subplots(figsize=(6, 4))
-        # Theme tối cho matplotlib
         fig.patch.set_facecolor('#2b2b2b')
         ax.set_facecolor('#2b2b2b')
         ax.tick_params(colors='white')
