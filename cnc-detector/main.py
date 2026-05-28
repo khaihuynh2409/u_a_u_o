@@ -165,9 +165,7 @@ class CNCDetectorApp(ctk.CTk):
         self.author_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
         self.author_frame.grid(row=11, column=0, padx=15, pady=(10, 10), sticky="sw")
         
-        authors_text = "Nhóm thực hiện:\n1. Huỳnh Quốc Khải - B5D13\n2. Nguyễn Hữu Hoàng - B5D13\n3. Vũ Thị Thu Trang - B6D13\n\nGVHD: Đại úy TS. Tống Anh Tuấn"
-        self.lbl_authors = ctk.CTkLabel(self.author_frame, text=authors_text, justify="left", font=ctk.CTkFont(size=12), text_color="#94a3b8")
-        self.lbl_authors.pack(anchor="w")
+        
 
     def import_pcap(self):
         """Mở hộp thoại Browse để chọn file PCAP và thêm vào dropdown."""
